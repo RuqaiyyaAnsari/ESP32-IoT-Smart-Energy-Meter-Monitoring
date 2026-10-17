@@ -74,7 +74,6 @@ The exact data flow between the broker, API, and dashboard depends on the config
 
 ## 📊 Dataset and Database Information
 
-To keep the repository within GitHub's file-size limits, the following files are intentionally excluded:
 
 - **`data/household_power_consumption.txt`** — The full household power consumption dataset is not included because it exceeds GitHub's 100 MB limit for a regular Git file.
 - **`data/mdms.db`** — The local database is excluded because it is a generated or local data artifact and may be recreated or configured separately.
