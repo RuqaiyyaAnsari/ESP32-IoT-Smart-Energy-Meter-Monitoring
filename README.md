@@ -81,9 +81,7 @@ The exact data flow between the broker, API, and dashboard depends on the config
 
 The repository includes `data/sample.csv` for sample-data testing.
 
-**If the full dataset is required:** Obtain it separately from the original dataset source used for this project and place it at `data/household_power_consumption.txt`, if that is the path expected by your scripts. Check the data preparation scripts for the required format and setup instructions.
-
-The full dataset and local database have not been deleted from the development computer; they are simply excluded from the GitHub repository.
+`data/household_power_consumption.txt`
 
 ## ⚙️ Setup and Execution
 
