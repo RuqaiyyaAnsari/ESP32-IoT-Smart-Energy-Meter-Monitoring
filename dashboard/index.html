@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K2 Smart Meter Demo Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f9; color: #1f2937; }
+  header { background: #12355b; color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header small { opacity: .8; }
+  main { padding: 20px 24px; max-width: 1200px; margin: auto; }
+  .cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .card { background: #fff; border-radius: 8px; padding: 14px 20px; flex: 1; min-width: 160px;
+          box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .card .num { font-size: 28px; font-weight: bold; }
+  .card .lbl { font-size: 13px; color: #6b7280; }
+  .good .num { color: #15803d; } .bad .num { color: #b91c1c; }
+  .panel { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 20px;
+           box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .panel h2 { margin: 0 0 10px; font-size: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #e5e7eb; }
+  th { background: #f9fafb; }
+  tr.meter { cursor: pointer; } tr.meter:hover { background: #eef4ff; }
+  tr.sel { background: #dbeafe; }
+  .pill { padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
+  .online { background: #15803d; } .offline { background: #9ca3af; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row .panel { flex: 1; min-width: 320px; }
+  code { font-size: 12px; color: #6b7280; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>K2 Smart Meter Demo Dashboard</h1>
+  <small>Dummy meters &rarr; MQTT &rarr; HES validation &rarr; MDMS database &rarr; REST API (auto-refresh every 3 sec)</small>
+</header>
+<main>
+  <div class="cards">
+    <div class="card"><div class="num" id="c-meters">-</div><div class="lbl">Meters reporting</div></div>
+    <div class="card good"><div class="num" id="c-good">-</div><div class="lbl">Valid readings stored</div></div>
+    <div class="card bad"><div class="num" id="c-bad">-</div><div class="lbl">Rejected by HES</div></div>
+    <div class="card"><div class="num" id="c-rate">-</div><div class="lbl">Rejection rate</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Meters (click a row to see its graphs)</h2>
+    <table>
+      <thead><tr><th>Meter</th><th>Status</th><th>kWh</th><th>Voltage (V)</th><th>Current (A)</th><th>Last reading</th></tr></thead>
+      <tbody id="meters"></tbody>
+    </table>
+  </div>
+
+  <div class="row">
+    <div class="panel"><h2 id="t-volt">Voltage</h2><canvas id="ch-volt" height="160"></canvas></div>
+    <div class="panel"><h2 id="t-kwh">Energy (kWh)</h2><canvas id="ch-kwh" height="160"></canvas></div>
+  </div>
+
+  <div class="row">
+    <div class="panel"><h2>Rejection reasons</h2><canvas id="ch-rej" height="160"></canvas></div>
+    <div class="panel"><h2>Latest rejected messages</h2>
+      <table><thead><tr><th>Reason</th><th>Raw message</th></tr></thead><tbody id="rejected"></tbody></table>
+    </div>
+  </div>
+</main>
+
+<script>
+let selected = null;
+const mk = (id, type, color) => new Chart(document.getElementById(id), {
+  type, data: { labels: [], datasets: [{ data: [], borderColor: color, backgroundColor: color,
+  tension: .2, pointRadius: 1 }] },
+  options: { animation: false, plugins: { legend: { display: false } } }
+});
+const chVolt = mk('ch-volt', 'line', '#2563eb');
+const chKwh  = mk('ch-kwh',  'line', '#16a34a');
+const chRej  = mk('ch-rej',  'bar',  '#dc2626');
+
+async function get(url) { const r = await fetch(url); return r.ok ? r.json() : null; }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function refresh() {
+  const s = await get('/api/summary');
+  if (s) {
+    document.getElementById('c-meters').textContent = s.meters;
+    document.getElementById('c-good').textContent = s.good;
+    document.getElementById('c-bad').textContent = s.rejected;
+    const total = s.good + s.rejected;
+    document.getElementById('c-rate').textContent = total ? (100 * s.rejected / total).toFixed(1) + '%' : '0%';
+    chRej.data.labels = s.reasons.map(r => r.reason);
+    chRej.data.datasets[0].data = s.reasons.map(r => r.count);
+    chRej.update();
+  }
+
+  const meters = await get('/api/meters') || [];
+  if (!selected && meters.length) selected = meters[0].meter_id;
+  document.getElementById('meters').innerHTML = meters.map(m => `
+    <tr class="meter ${m.meter_id === selected ? 'sel' : ''}" onclick="pick('${m.meter_id}')">
+      <td>${m.meter_id}</td>
+      <td><span class="pill ${m.status}">${m.status}</span></td>
+      <td>${m.kwh}</td><td>${m.voltage}</td><td>${m.current}</td><td>${m.ts}</td>
+    </tr>`).join('');
+
+  if (selected) {
+    const rd = await get(`/api/meters/${selected}/readings?limit=60`);
+    if (rd) {
+      const labels = rd.map(r => r.ts.slice(11, 19));
+      document.getElementById('t-volt').textContent = 'Voltage - ' + selected;
+      document.getElementById('t-kwh').textContent = 'Energy (kWh) - ' + selected;
+      chVolt.data.labels = labels; chVolt.data.datasets[0].data = rd.map(r => r.voltage); chVolt.update();
+      chKwh.data.labels = labels;  chKwh.data.datasets[0].data = rd.map(r => r.kwh);     chKwh.update();
+    }
+  }
+
+  const rej = await get('/api/rejected?limit=8') || [];
+  document.getElementById('rejected').innerHTML = rej.map(r =>
+    `<tr><td>${esc(r.reason)}</td><td><code>${esc(r.raw.slice(0, 90))}</code></td></tr>`).join('');
+}
+function pick(id) { selected = id; refresh(); }
+refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>
